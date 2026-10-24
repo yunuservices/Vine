@@ -19,6 +19,7 @@ serde_json = { version = "1.0" }
 toml = { version = "1.1", features = ["parse", "display", "serde"] }
 tracing = { version = "0.1" }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-appender = { version = "0.2" }
 thiserror = { version = "2.0" }
 bytes = { version = "1.12" }
 uuid = { version = "1.26", features = ["serde", "v3", "v4"] }

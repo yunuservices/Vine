@@ -9,11 +9,12 @@ use vine::proxy::ProxyServer;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Lines are written on a thread of their own, so a slow console never holds up the proxy;
+    // the guard flushes what is left, so drop it before exiting
+    let (log_writer, log_guard) = tracing_appender::non_blocking(std::io::stdout());
     tracing_subscriber::registry()
-        .with(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,vine=debug")),
-        )
-        .with(tracing_subscriber::fmt::layer())
+        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+        .with(tracing_subscriber::fmt::layer().with_writer(log_writer))
         .init();
 
     // `--init` writes the default files and exits without starting the proxy
@@ -33,6 +34,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 config_path.display(),
                 e
             );
+            drop(log_guard);
             std::process::exit(1);
         }
     };
@@ -86,10 +88,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if let Err(e) = server.run(shutdown_tx).await {
         error!("Fatal proxy error: {}", e);
+        drop(log_guard);
         std::process::exit(1);
     }
 
     info!("Stopped");
+    drop(log_guard);
     std::process::exit(0);
 }
 
