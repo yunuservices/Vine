@@ -550,6 +550,11 @@ pub(super) enum BackendEvent {
     Lost {
         reason: Option<String>,
     },
+    /// A request for the proxy on the BungeeCord channel, and the channel name it came on
+    Bungee {
+        channel: String,
+        data: Vec<u8>,
+    },
     ClientGone,
 }
 
@@ -738,6 +743,17 @@ impl Session {
                 return Err(Some(BackendEvent::Lost { reason }));
             }
             Handling::PluginMessage => {
+                if current == Phase::Play
+                    && self.proxy_config.server.bungee_plugin_message_channel
+                    && let Ok((channel, data)) =
+                        read_plugin_message(&mut &raw_packet.payload[..], version)
+                    && super::bungee::is_channel(&channel)
+                {
+                    return match events.send(BackendEvent::Bungee { channel, data }).await {
+                        Ok(()) => Ok(()),
+                        Err(_) => Err(None),
+                    };
+                }
                 if !self
                     .plugin_message_event(&mut raw_packet, server_name, PluginMessageSource::Server)
                     .await

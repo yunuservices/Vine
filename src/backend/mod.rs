@@ -1,4 +1,5 @@
 pub mod bridge;
+mod bungee;
 mod client_queue;
 mod connection;
 pub mod forwarding;

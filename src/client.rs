@@ -610,6 +610,7 @@ impl ClientHandler {
             current_server: server_name.clone(),
             action_tx: action_tx.clone(),
             client_ip: client_ip.to_string(),
+            client_port: self.peer_addr.port(),
             protocol_version: client_version.0,
             locale: None,
             locale_override: None,

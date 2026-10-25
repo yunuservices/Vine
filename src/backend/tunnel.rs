@@ -7,6 +7,7 @@ use tokio::time::timeout;
 use tracing::{debug, info, warn};
 
 use super::bridge::{BackendBridge, Phase, disconnect_packet};
+use super::bungee::{self, Asker, Outcome};
 use super::client_queue::{CLIENT_WRITE_TIMEOUT, ClientQueue, Room};
 use super::connection::{Backend, Conn};
 use super::login::{BackendReader, BackendWriter, PreparedBackend};
@@ -193,6 +194,9 @@ impl Tunnel {
                 Ok(())
             }
             Event::Backend(Some(BackendEvent::Lost { reason })) => self.backend_lost(reason),
+            Event::Backend(Some(BackendEvent::Bungee { channel, data })) => {
+                self.bungee(&channel, &data)
+            }
             Event::Backend(Some(BackendEvent::ClientGone)) => Err(End::Closed),
             Event::Backend(None) => self.backend_stopped(),
             Event::Action(Some(action)) => self.action(action),
@@ -401,12 +405,54 @@ impl Tunnel {
             PlayerAction::PluginMessage { channel, data } => {
                 encode_packet(&ClientboundPluginMessage { channel, data }, version)
             }
+            PlayerAction::ServerPluginMessage { channel, data } => {
+                return self.send_to_backend(&channel, &data);
+            }
         };
         if let Ok(bytes) = encoded {
             let room = self.client_out.room(bytes.len());
             self.message = Some(HeldMessage { bytes, room });
         }
         Ok(())
+    }
+
+    /// Answers a backend's request on the BungeeCord channel
+    fn bungee(&mut self, channel: &str, data: &[u8]) -> Result<(), End> {
+        let asker = Asker {
+            username: &self.session.username,
+            uuid: self.session.uuid,
+            server: &self.backend.name,
+        };
+        match bungee::handle(
+            data,
+            &asker,
+            &self.bridge.proxy_config,
+            &self.session.session_manager,
+        ) {
+            Outcome::Reply(reply) => self.send_to_backend(channel, &reply),
+            Outcome::Connect(target) => self.request_switch(target),
+            Outcome::Done => Ok(()),
+        }
+    }
+
+    /// Sends a plugin message to the current backend while it reads play packets from the client
+    fn send_to_backend(&mut self, channel: &str, data: &[u8]) -> Result<(), End> {
+        let version = self.session.version;
+        if !matches!(self.link, Link::Play | Link::Reconfiguring) {
+            return Ok(());
+        }
+        let Some(id) = PacketKind::ServerboundPluginMessage.id(version) else {
+            return Ok(());
+        };
+        let mut payload = Vec::new();
+        write_plugin_message(&mut payload, channel, data, version);
+        self.forward(
+            crate::protocol::RawPacket {
+                id,
+                payload: payload.into(),
+            }
+            .to_bytes(),
+        )
     }
 
     fn request_switch(&mut self, target: String) -> Result<(), End> {

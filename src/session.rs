@@ -18,6 +18,8 @@ pub enum PlayerAction {
     Disconnect(String),
     /// Send a custom plugin message / payload to the player
     PluginMessage { channel: String, data: Vec<u8> },
+    /// Send a plugin message to the backend the player is on
+    ServerPluginMessage { channel: String, data: Vec<u8> },
 }
 
 /// Actions a player's connection holds before senders that cannot wait start dropping theirs
@@ -64,6 +66,7 @@ pub struct PlayerSession {
     pub current_server: String,
     pub action_tx: mpsc::Sender<PlayerAction>,
     pub client_ip: String,
+    pub client_port: u16,
     pub protocol_version: u32,
     /// Language reported by the client, e.g. `en_us`
     pub locale: Option<String>,
@@ -299,6 +302,7 @@ mod tests {
                 current_server: "lobby".to_string(),
                 action_tx: tx,
                 client_ip: "127.0.0.1".to_string(),
+                client_port: 0,
                 protocol_version: 769,
                 locale: None,
                 locale_override: None,
@@ -330,6 +334,7 @@ mod tests {
                 current_server: "lobby".to_string(),
                 action_tx: tx,
                 client_ip: "127.0.0.1".to_string(),
+                client_port: 0,
                 protocol_version: 769,
                 locale: Some("tr_tr".to_string()),
                 locale_override: None,

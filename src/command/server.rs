@@ -188,6 +188,7 @@ mod tests {
             current_server: "lobby".to_string(),
             action_tx: action_tx.clone(),
             client_ip: "127.0.0.1".to_string(),
+            client_port: 0,
             protocol_version: 765,
             locale: None,
             locale_override: None,

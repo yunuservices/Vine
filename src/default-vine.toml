@@ -25,6 +25,8 @@ default_locale = "en_us"
 accept_transfers = false
 # A second login of an account disconnects the first one instead of being refused (online mode only)
 kick_existing_players = false
+# Answer backend plugins that use the BungeeCord channel (server selectors, player counts, ...)
+bungee_plugin_message_channel = true
 
 # Backend servers players can be sent to. Each one needs:
 #   address     host:port of the server

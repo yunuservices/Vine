@@ -156,6 +156,9 @@ pub struct ServerConfig {
     /// A second login of an online account disconnects the first one instead of being refused
     #[serde(default)]
     pub kick_existing_players: bool,
+    /// Answer backend plugins asking the proxy things on the BungeeCord channel
+    #[serde(default = "default_true")]
+    pub bungee_plugin_message_channel: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
