@@ -13,6 +13,7 @@
   "vine.login.no_server": "No default or matching backend Minecraft server is configured on the proxy.",
   "vine.login.already_connected": "You are already connected to this proxy.",
   "vine.login.transfers_disabled": "This server does not accept transfers.",
+  "vine.login.logged_in_elsewhere": "You logged in from another location.",
   "vine.plugin.cancelled_connection": "Connection cancelled by plugin",
   "vine.plugin.cancelled_login": "Login cancelled by plugin",
   "vine.plugin.cancelled_switch": "Server switch cancelled by plugin",

@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
-use tokio::sync::mpsc;
+use std::time::Duration;
+use tokio::sync::{Notify, mpsc};
 use uuid::Uuid;
 
 use pumpkin_util::text::TextComponent;
@@ -83,6 +84,8 @@ pub struct SessionManager {
     sessions: RwLock<HashMap<String, PlayerSession>>,
     // Accounts between passing the duplicate check and registering their session
     logging_in: Mutex<Vec<(String, Uuid)>>,
+    // Woken whenever a login or session lets go of its account
+    released: Notify,
 }
 
 impl Default for SessionManager {
@@ -96,6 +99,7 @@ impl SessionManager {
         Self {
             sessions: RwLock::new(HashMap::new()),
             logging_in: Mutex::new(Vec::new()),
+            released: Notify::new(),
         }
     }
 
@@ -117,6 +121,49 @@ impl SessionManager {
             key,
             uuid,
         })
+    }
+
+    /// Disconnects the online session of this account, if there is one, with a reason in its
+    /// player's language. A session still logging in is left alone.
+    pub fn kick_online(
+        &self,
+        username: &str,
+        uuid: Uuid,
+        reason: impl Fn(Option<&str>) -> String,
+    ) -> bool {
+        let key = username.to_ascii_lowercase();
+        let Ok(sessions) = self.sessions.read() else {
+            return false;
+        };
+        let Some(session) = sessions
+            .get(&key)
+            .or_else(|| sessions.values().find(|s| s.uuid == uuid))
+        else {
+            return false;
+        };
+        send_reliably(
+            &session.action_tx,
+            PlayerAction::Disconnect(reason(session.effective_locale())),
+        );
+        true
+    }
+
+    /// Like `try_begin_login`, but waits up to `wait` for the account's sessions to end
+    pub async fn begin_login_when_free(
+        self: &Arc<Self>,
+        username: &str,
+        uuid: Uuid,
+        wait: Duration,
+    ) -> Option<LoginGuard> {
+        let deadline = tokio::time::Instant::now() + wait;
+        loop {
+            // Created before the check, so a session ending in between still wakes it
+            let released = self.released.notified();
+            if let Some(guard) = self.try_begin_login(username, uuid) {
+                return Some(guard);
+            }
+            tokio::time::timeout_at(deadline, released).await.ok()?;
+        }
     }
 
     /// Registers the session unless the username or UUID is already online.
@@ -216,6 +263,7 @@ impl Drop for LoginGuard {
         if let Ok(mut lock) = self.manager.logging_in.lock() {
             lock.retain(|(k, u)| !(*k == self.key && *u == self.uuid));
         }
+        self.manager.released.notify_waiters();
     }
 }
 
@@ -232,6 +280,7 @@ impl Drop for SessionGuard {
         {
             lock.remove(&self.key);
         }
+        self.manager.released.notify_waiters();
     }
 }
 
@@ -265,5 +314,46 @@ mod tests {
         drop(guard);
         assert_eq!(manager.count(), 0);
         assert!(manager.try_register(session("STEVE", 2)).is_some());
+    }
+
+    #[tokio::test]
+    async fn test_kicked_session_frees_the_account_for_the_new_login() {
+        let manager = Arc::new(SessionManager::new());
+        let uuid = Uuid::from_u128(1);
+        let (tx, mut rx) = mpsc::channel(1);
+        // The old connection holds its login guard until it ends, like a real one
+        let login = manager.try_begin_login("Steve", uuid).unwrap();
+        let registered = manager
+            .try_register(PlayerSession {
+                username: "Steve".to_string(),
+                uuid,
+                current_server: "lobby".to_string(),
+                action_tx: tx,
+                client_ip: "127.0.0.1".to_string(),
+                protocol_version: 769,
+                locale: Some("tr_tr".to_string()),
+                locale_override: None,
+                plugin_waiting: Default::default(),
+            })
+            .unwrap();
+        let old = tokio::spawn(async move {
+            let action = rx.recv().await;
+            drop(registered);
+            tokio::task::yield_now().await;
+            drop(login);
+            action
+        });
+
+        assert!(manager.try_begin_login("Steve", uuid).is_none());
+        assert!(manager.kick_online("steve", uuid, |locale| format!("bye {locale:?}")));
+        let guard = manager
+            .begin_login_when_free("Steve", uuid, Duration::from_secs(5))
+            .await;
+        assert!(guard.is_some());
+        assert_eq!(
+            old.await.unwrap(),
+            Some(PlayerAction::Disconnect("bye Some(\"tr_tr\")".to_string()))
+        );
+        assert!(!manager.kick_online("Steve", uuid, |_| String::new()));
     }
 }

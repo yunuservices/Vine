@@ -153,6 +153,9 @@ pub struct ServerConfig {
     /// Let in 1.20.5+ players another server sent here with a transfer
     #[serde(default)]
     pub accept_transfers: bool,
+    /// A second login of an online account disconnects the first one instead of being refused
+    #[serde(default)]
+    pub kick_existing_players: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -602,6 +605,13 @@ impl Config {
                     ));
                 }
             }
+        }
+        if self.server.kick_existing_players && !self.server.online_mode {
+            warnings.push(
+                "server.kick_existing_players only works in online mode, where accounts are \
+                 verified"
+                    .to_string(),
+            );
         }
         if self.routing.fallback_server.as_ref() == Some(&self.routing.default_server) {
             warnings.push(

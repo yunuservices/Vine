@@ -493,10 +493,33 @@ impl ClientHandler {
 
         // Checked before PlayerLogin so plugins never see a login, or a disconnect, for a player
         // whose account is already playing or logging in on another connection
-        let Some(_login_guard) = self
+        let mut login_guard = self
             .session_manager
-            .try_begin_login(&authenticated_player.username, authenticated_player.id)
-        else {
+            .try_begin_login(&authenticated_player.username, authenticated_player.id);
+        // Only in online mode, where the account is proven; offline anyone could take any name
+        if login_guard.is_none()
+            && self.config.server.kick_existing_players
+            && self.config.server.online_mode
+            && self.session_manager.kick_online(
+                &authenticated_player.username,
+                authenticated_player.id,
+                |locale| translate(locale, "vine.login.logged_in_elsewhere", &[]),
+            )
+        {
+            info!(
+                "[{}] '{}' logged in again; disconnecting the previous connection",
+                self.peer_addr, authenticated_player.username
+            );
+            login_guard = self
+                .session_manager
+                .begin_login_when_free(
+                    &authenticated_player.username,
+                    authenticated_player.id,
+                    Duration::from_secs(5),
+                )
+                .await;
+        }
+        let Some(_login_guard) = login_guard else {
             warn!(
                 "[{}] Rejecting duplicate login for '{}' ({})",
                 self.peer_addr, authenticated_player.username, authenticated_player.id

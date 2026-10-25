@@ -23,6 +23,8 @@ force_key_authentication = true
 default_locale = "en_us"
 # Let in 1.20.5+ players another server sent here with a transfer
 accept_transfers = false
+# A second login of an account disconnects the first one instead of being refused (online mode only)
+kick_existing_players = false
 
 # Backend servers players can be sent to. Each one needs:
 #   address     host:port of the server
