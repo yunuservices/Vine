@@ -38,10 +38,11 @@ pub(super) enum Switch {
         prepared: Box<PreparedBackend>,
         clock: AckClock,
     },
-    /// The current backend is gone and the player is moved to the fallback server
+    /// The current backend is gone and the player is moved to the next server to try
     Fallback {
         reason: String,
         job: Job,
+        tried: Vec<String>,
     },
 }
 

@@ -445,8 +445,8 @@ impl Tunnel {
                             .unwrap_or_else(|| Connected::Prepared(target, Err(job_ended())));
                         self.connected(connected)
                     }
-                    Switch::Fallback { reason, .. } => match connected {
-                        Some(connected) => self.fallen_back(reason, connected),
+                    Switch::Fallback { reason, tried, .. } => match connected {
+                        Some(connected) => self.fallen_back(reason, tried, connected),
                         None => Err(End::Kicked(reason)),
                     },
                     other => {
@@ -531,7 +531,12 @@ impl Tunnel {
         Ok(())
     }
 
-    fn fallen_back(&mut self, reason: String, connected: Connected) -> Result<(), End> {
+    fn fallen_back(
+        &mut self,
+        reason: String,
+        mut tried: Vec<String>,
+        connected: Connected,
+    ) -> Result<(), End> {
         match connected {
             Connected::Prepared(target, Ok(prepared)) => {
                 info!(
@@ -546,6 +551,10 @@ impl Tunnel {
                     "Failed to connect player '{}' to fallback server '{}': {}",
                     self.session.username, target, e
                 );
+                tried.push(target);
+                if self.bridge.next_server(&tried).is_some() {
+                    return self.fall_back(reason, tried);
+                }
                 let e = e.to_string();
                 Err(End::Kicked(self.translate(
                     "vine.server.fallback_failed",
@@ -644,27 +653,28 @@ impl Tunnel {
         }
     }
 
-    /// With the current backend gone, moves the player to the fallback server or disconnects them
+    /// With the current backend gone, moves the player to the next server to try or disconnects
+    /// them
     fn reroute(&mut self, reason: Option<String>) -> Result<(), End> {
         warn!(
             "Backend server '{}' disconnected player '{}': {:?}",
             self.backend.name, self.session.username, reason
         );
         let reason = reason.unwrap_or_else(|| self.translate("vine.server.lost_connection", &[]));
-        let fallback = self
-            .bridge
-            .fallback_server
-            .clone()
-            .filter(|(name, _)| name != &self.backend.name);
-        let Some((target, config)) = fallback else {
+        self.fall_back(reason, vec![self.backend.name.clone()])
+    }
+
+    fn fall_back(&mut self, reason: String, mut tried: Vec<String>) -> Result<(), End> {
+        let Some((target, config)) = self.bridge.next_server(&tried).cloned() else {
             return Err(End::Kicked(reason));
         };
+        tried.push(target.clone());
         let job = Job::spawn(self.bridge.clone().fallback_job(
             self.backend.name.clone(),
             target,
             config,
         ));
-        self.switch = Switch::Fallback { reason, job };
+        self.switch = Switch::Fallback { reason, job, tried };
         Ok(())
     }
 

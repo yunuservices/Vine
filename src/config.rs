@@ -278,15 +278,78 @@ pub struct SecurityConfig {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RoutingConfig {
-    /// Default backend server name to connect to
+    /// Servers tried in order when a player joins, and when their server goes down or kicks them
+    #[serde(default, rename = "try")]
+    pub try_servers: Vec<String>,
+    /// Older form of `try`: the first server
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub default_server: String,
-    /// Fallback server if default server is offline
+    /// Older form of `try`: the server after `default_server`
+    #[serde(default)]
     pub fallback_server: Option<String>,
-    /// Virtual host routing: maps domain/hostname to backend server name
-    pub forced_hosts: HashMap<String, String>,
-    /// Automatically try fallback server if connection to target server fails
+    /// Hostname players connect with, to the server or servers to try for them instead of `try`
+    #[serde(default)]
+    pub forced_hosts: HashMap<String, ServerList>,
+    /// Move players on to the next server when one cannot be reached or drops them
     #[serde(default = "default_true")]
     pub try_fallback_on_connect_failure: bool,
+}
+
+impl RoutingConfig {
+    /// Folds `default_server` and `fallback_server` into `try` and normalizes the hostnames
+    fn normalize(&mut self) {
+        if self.try_servers.is_empty() {
+            if !self.default_server.is_empty() {
+                self.try_servers.push(self.default_server.clone());
+            }
+            self.try_servers.extend(self.fallback_server.clone());
+        } else if !self.default_server.is_empty() || self.fallback_server.is_some() {
+            tracing::warn!(
+                "routing.default_server and routing.fallback_server are ignored because routing.try is set"
+            );
+        }
+        self.forced_hosts = std::mem::take(&mut self.forced_hosts)
+            .into_iter()
+            .map(|(host, servers)| (normalize_host(&host), servers))
+            .collect();
+    }
+
+    /// Server players join when nothing else picks one
+    pub fn first_server(&self) -> &str {
+        self.try_servers.first().map_or("", String::as_str)
+    }
+
+    /// Servers to try, in order, for a player who connected with this hostname
+    pub fn servers_for(&self, host: &str) -> &[String] {
+        self.forced_hosts
+            .get(&normalize_host(host))
+            .map_or(&self.try_servers, ServerList::names)
+    }
+
+    /// Each forced host with the first server it sends players to
+    pub fn forced_host_firsts(&self) -> HashMap<String, String> {
+        self.forced_hosts
+            .iter()
+            .filter_map(|(host, servers)| Some((host.clone(), servers.names().first()?.clone())))
+            .collect()
+    }
+}
+
+/// One server name, or several to try in order
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum ServerList {
+    One(String),
+    Many(Vec<String>),
+}
+
+impl ServerList {
+    pub fn names(&self) -> &[String] {
+        match self {
+            Self::One(name) => std::slice::from_ref(name),
+            Self::Many(names) => names,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -363,7 +426,10 @@ const DEFAULT_CONFIG: &str = include_str!("default-vine.toml");
 
 impl Default for Config {
     fn default() -> Self {
-        toml::from_str(DEFAULT_CONFIG).expect("the default configuration parses")
+        let mut config: Config =
+            toml::from_str(DEFAULT_CONFIG).expect("the default configuration parses");
+        config.routing.normalize();
+        config
     }
 }
 
@@ -410,22 +476,19 @@ impl Config {
         let mut config = if path.exists() {
             let text = std::fs::read_to_string(path)?;
             let mut unknown = Vec::new();
-            let config: Config =
+            let mut config: Config =
                 serde_ignored::deserialize(toml::Deserializer::parse(&text)?, |key| {
                     unknown.push(key.to_string())
                 })?;
             for key in unknown {
                 tracing::warn!("Unknown setting '{key}' in '{}' is ignored", path.display());
             }
+            config.routing.normalize();
             config
         } else {
             std::fs::write(path, DEFAULT_CONFIG)?;
             Config::default()
         };
-        config.routing.forced_hosts = std::mem::take(&mut config.routing.forced_hosts)
-            .into_iter()
-            .map(|(host, server)| (normalize_host(&host), server))
-            .collect();
         // Hosting panels assign the port at start, so it wins over the file
         if let Ok(bind) = std::env::var(BIND_ADDRESS_ENV)
             && !bind.trim().is_empty()
@@ -549,17 +612,19 @@ impl Config {
                 ));
             }
         }
-        let routes = std::iter::once(("routing.default_server", &self.routing.default_server))
-            .chain(
-                self.routing
-                    .fallback_server
-                    .iter()
-                    .map(|name| ("routing.fallback_server", name)),
-            )
+        if self.routing.try_servers.is_empty() {
+            errors.push("routing.try is empty; list the servers players join".to_string());
+        }
+        let routes = self
+            .routing
+            .try_servers
+            .iter()
+            .map(|name| ("routing.try", name))
             .chain(
                 self.routing
                     .forced_hosts
                     .values()
+                    .flat_map(ServerList::names)
                     .map(|name| ("routing.forced_hosts", name)),
             );
         for (field, name) in routes {
@@ -613,12 +678,11 @@ impl Config {
                     .to_string(),
             );
         }
-        if self.routing.fallback_server.as_ref() == Some(&self.routing.default_server) {
-            warnings.push(
-                "routing.fallback_server is the default server itself, so players have nowhere \
-                 to fall back to"
-                    .to_string(),
-            );
+        let tried = &self.routing.try_servers;
+        for (i, name) in tried.iter().enumerate() {
+            if tried[..i].contains(name) {
+                warnings.push(format!("routing.try lists '{name}' more than once"));
+            }
         }
         warnings
     }
@@ -698,6 +762,35 @@ mod tests {
         for (section, default) in defaults {
             assert_eq!(template[section], default.unwrap(), "[{section}]");
         }
+    }
+
+    #[test]
+    fn test_routing_reads_the_older_keys_and_server_lists() {
+        let mut routing: RoutingConfig = toml::from_str(
+            r#"
+            default_server = "lobby"
+            fallback_server = "survival"
+            [forced_hosts]
+            "Play.Example.com." = ["minigames", "lobby"]
+            "old.example.com" = "survival"
+            "#,
+        )
+        .unwrap();
+        routing.normalize();
+        assert_eq!(routing.try_servers, ["lobby", "survival"]);
+        assert_eq!(
+            routing.servers_for("play.example.com"),
+            ["minigames", "lobby"]
+        );
+        assert_eq!(routing.servers_for("OLD.example.com"), ["survival"]);
+        assert_eq!(
+            routing.servers_for("other.example.com"),
+            ["lobby", "survival"]
+        );
+        assert_eq!(
+            routing.forced_host_firsts()["play.example.com"],
+            "minigames"
+        );
     }
 
     #[test]

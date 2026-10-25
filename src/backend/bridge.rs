@@ -59,7 +59,8 @@ pub enum BridgeError {
 pub struct BackendBridge {
     server_name: String,
     config: BackendConfig,
-    pub(super) fallback_server: Option<(String, BackendConfig)>,
+    /// Servers to move on to, in order, when one fails; empty when that is turned off
+    servers_to_try: Vec<(String, BackendConfig)>,
     pub(super) client_ip: IpAddr,
     pub(super) client_version: ProtocolVersion,
     pub(super) virtual_host: String,
@@ -79,7 +80,7 @@ impl BackendBridge {
     pub fn new(
         server_name: String,
         config: BackendConfig,
-        fallback_server: Option<(String, BackendConfig)>,
+        servers_to_try: Vec<(String, BackendConfig)>,
         client_ip: IpAddr,
         client_version: ProtocolVersion,
         virtual_host: String,
@@ -96,7 +97,7 @@ impl BackendBridge {
         Self {
             server_name,
             config,
-            fallback_server,
+            servers_to_try,
             client_ip,
             client_version,
             virtual_host,
@@ -110,6 +111,13 @@ impl BackendBridge {
             proxy_config,
             plugin_manager,
         }
+    }
+
+    /// The first server to move on to that has not been tried yet
+    pub(super) fn next_server(&self, tried: &[String]) -> Option<&(String, BackendConfig)> {
+        self.servers_to_try
+            .iter()
+            .find(|(name, _)| !tried.contains(name))
     }
 
     /// Establishes connection to backend, handles login handshake, and tunnels packets
@@ -228,16 +236,17 @@ impl BackendBridge {
         let mut login = self
             .login_backend(&current_server_name, &initial_backend_cfg)
             .await;
-        if let Err(e) = &login
-            && let Some((fb_name, fb_cfg)) = &self.fallback_server
-            && fb_name != &current_server_name
+        let mut tried = vec![current_server_name.clone()];
+        while let Err(e) = &login
+            && let Some((next, next_cfg)) = self.next_server(&tried)
         {
             warn!(
-                "Primary server '{}' unreachable ({}), attempting failover to fallback server '{}' at {}",
-                current_server_name, e, fb_name, fb_cfg.address
+                "Server '{}' unreachable ({}), trying '{}' at {}",
+                current_server_name, e, next, next_cfg.address
             );
-            current_server_name = fb_name.clone();
-            login = self.login_backend(&current_server_name, fb_cfg).await;
+            tried.push(next.clone());
+            current_server_name = next.clone();
+            login = self.login_backend(&current_server_name, next_cfg).await;
         }
         let (backend_reader, backend_writer, success_bytes) = match login {
             Ok(res) => res,

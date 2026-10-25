@@ -61,15 +61,15 @@ impl ProxyServer {
         let icon_manager = Arc::new(StatusIconManager::new(
             config.motd.icon_path.clone(),
             server_icons,
-            config.routing.forced_hosts.clone(),
-            config.routing.default_server.clone(),
+            config.routing.forced_host_firsts(),
+            config.routing.first_server().to_string(),
         ));
 
         let status_handler = Arc::new(StatusHandler::new(
             config.motd.clone(),
             icon_manager,
             config.servers.clone(),
-            config.routing.forced_hosts.clone(),
+            config.routing.forced_host_firsts(),
         ));
 
         let router = Arc::new(Router::new(config.routing.clone(), config.servers.clone()));
@@ -145,12 +145,16 @@ impl ProxyServer {
             .unwrap_or(0);
         info!("Servers:");
         for (name, server) in servers {
-            let role = if *name == self.config.routing.default_server {
-                " (default)"
-            } else if self.config.routing.fallback_server.as_ref() == Some(name) {
-                " (fallback)"
-            } else {
-                ""
+            let role = match self
+                .config
+                .routing
+                .try_servers
+                .iter()
+                .position(|n| n == name)
+            {
+                Some(0) => " (joined first)".to_string(),
+                Some(i) => format!(" (tried #{})", i + 1),
+                None => String::new(),
             };
             let forwarding = match server.forwarding {
                 ForwardingMode::None => "no forwarding",

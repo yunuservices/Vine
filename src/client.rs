@@ -574,8 +574,9 @@ impl ClientHandler {
         let max_packet = self.config.security.max_packet_size;
         reader.set_limits(max_packet, max_packet);
 
-        let (server_name, backend_cfg) = match self.router.resolve_server(&virtual_host) {
-            Some(res) => res,
+        let mut servers = self.router.servers_for(&virtual_host);
+        let (server_name, backend_cfg) = match servers.first() {
+            Some(first) => first.clone(),
             None => {
                 warn!(
                     "[{}] No backend server found for host '{}'",
@@ -598,20 +599,9 @@ impl ClientHandler {
             }
         };
 
-        let fallback_server = if self.config.routing.try_fallback_on_connect_failure {
-            self.config
-                .routing
-                .fallback_server
-                .as_ref()
-                .and_then(|fb_name| {
-                    self.config
-                        .servers
-                        .get(fb_name)
-                        .map(|cfg| (fb_name.clone(), cfg.clone()))
-                })
-        } else {
-            None
-        };
+        if !self.config.routing.try_fallback_on_connect_failure {
+            servers.clear();
+        }
 
         let (action_tx, action_rx) = tokio::sync::mpsc::channel(crate::session::ACTION_QUEUE);
         let Some(_session_guard) = self.session_manager.try_register(PlayerSession {
@@ -641,7 +631,7 @@ impl ClientHandler {
         let bridge = BackendBridge::new(
             server_name,
             backend_cfg,
-            fallback_server,
+            servers,
             client_ip,
             client_version,
             virtual_host,

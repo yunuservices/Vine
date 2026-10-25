@@ -48,17 +48,16 @@ address = "127.0.0.1:25568"
 forwarding = "none"
 
 [routing]
-# Server players join first
-default_server = "lobby"
-# Server players are sent to when theirs goes down or kicks them; remove the line for none
-fallback_server = "survival"
-# Also try the fallback when the server a player is joining cannot be reached
+# Servers players join, tried in order; when their server goes down or kicks them, they move on
+# to the next one
+try = ["lobby", "survival"]
+# Move on to the next server when one cannot be reached or drops the player; off disconnects them
 try_fallback_on_connect_failure = true
 
-# Send players to a server by the address they typed
+# Send players to a server by the address they typed; a list is tried in order like try
 [routing.forced_hosts]
 "survival.example.com" = "survival"
-"vanilla.example.com" = "vanilla"
+"vanilla.example.com" = ["vanilla", "lobby"]
 
 [motd]
 # Server list text; MiniMessage tags work, \n starts a second line
