@@ -401,7 +401,7 @@ pub fn start_telemetry(
         return None;
     }
 
-    tracing::info!(
+    tracing::debug!(
         "Anonymous server telemetry is enabled. Sending periodic heartbeats to {}",
         config.telemetry.endpoint
     );
@@ -457,13 +457,13 @@ pub fn start_telemetry(
         }
 
         // Trigger shutdown telemetry on server termination / SIGTERM
-        tracing::info!("Sending server shutdown notice to telemetry backend...");
+        tracing::debug!("Sending server shutdown notice to telemetry backend...");
         match telemetry_client
             .send_shutdown(Some("server shutdown"))
             .await
         {
             Ok(()) => {
-                tracing::info!(
+                tracing::debug!(
                     "Telemetry shutdown notification successfully acknowledged by backend."
                 );
             }

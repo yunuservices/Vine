@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tokio::sync::broadcast;
 use tracing::{debug, error, info, warn};
@@ -101,83 +101,91 @@ impl ProxyServer {
     pub async fn run(
         &self,
         shutdown_tx: broadcast::Sender<()>,
+        started: Instant,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let mut shutdown_rx = shutdown_tx.subscribe();
         let bind_addr = &self.config.server.bind_address;
         let listener = network::create_tcp_listener(bind_addr, &self.config.network)?;
 
-        info!("=====================================================");
-        info!("  Vine Minecraft Proxy is listening on {}", bind_addr);
-        info!("  Online mode: {}", self.config.server.online_mode);
         info!(
-            "  Supported Minecraft versions: {}",
+            "Vine {} for Minecraft {}",
+            env!("CARGO_PKG_VERSION"),
             crate::protocol::ProtocolVersion::supported_range()
         );
-        info!("  Networking options:");
-        info!("    - TCP_NODELAY: {}", self.config.network.tcp_nodelay);
         info!(
-            "    - TCP KeepAlive: {}s",
-            self.config.network.tcp_keepalive_secs
+            "Vine Minecraft Proxy is listening on {} ({})",
+            bind_addr,
+            if self.config.server.online_mode {
+                "online mode"
+            } else {
+                "offline mode"
+            }
         );
-        info!(
-            "    - PROXY Protocol v1/v2: {}",
-            self.config.network.proxy_protocol
-        );
-        info!(
-            "    - Handshake timeout: {}s",
-            self.config.network.client_handshake_timeout_secs
-        );
-        info!(
-            "    - Login timeout: {}s",
-            self.config.network.client_login_timeout_secs
-        );
-        info!(
-            "    - Backend connect timeout: {}s",
-            self.config.network.backend_connect_timeout_secs
-        );
-        info!(
-            "    - Compression level: {} (threshold: {} bytes)",
-            self.config.server.compression_level, self.config.server.compression_threshold
-        );
-        info!(
-            "  Configured backend servers: {}",
-            self.config.servers.len()
-        );
-        for (name, server) in &self.config.servers {
-            let icon_info = server.icon_path.as_deref().unwrap_or("none");
-            info!(
-                "    - [{}] {} (Forwarding: {:?}, Icon: {})",
-                name, server.address, server.forwarding, icon_info
+        if !self.config.server.online_mode {
+            warn!(
+                "Online mode is off: players are not checked against Mojang, so anyone can join under any name"
             );
+        }
+        debug!(
+            "Networking: TCP_NODELAY {}, keepalive {}s, PROXY protocol {}, handshake timeout {}s, login timeout {}s, backend connect timeout {}s, compression level {} above {} bytes",
+            self.config.network.tcp_nodelay,
+            self.config.network.tcp_keepalive_secs,
+            self.config.network.proxy_protocol,
+            self.config.network.client_handshake_timeout_secs,
+            self.config.network.client_login_timeout_secs,
+            self.config.network.backend_connect_timeout_secs,
+            self.config.server.compression_level,
+            self.config.server.compression_threshold
+        );
+        let mut servers: Vec<_> = self.config.servers.iter().collect();
+        servers.sort_by_key(|(name, _)| name.as_str());
+        let width = servers
+            .iter()
+            .map(|(name, _)| name.len())
+            .max()
+            .unwrap_or(0);
+        info!("Servers:");
+        for (name, server) in servers {
+            let role = if *name == self.config.routing.default_server {
+                " (default)"
+            } else if self.config.routing.fallback_server.as_ref() == Some(name) {
+                " (fallback)"
+            } else {
+                ""
+            };
+            let forwarding = match server.forwarding {
+                ForwardingMode::None => "no forwarding",
+                ForwardingMode::BungeeCord => "BungeeCord forwarding",
+                ForwardingMode::Velocity => "Velocity forwarding",
+                ForwardingMode::Vine => "Vine forwarding",
+            };
+            info!("  {name:<width$}  {}, {forwarding}{role}", server.address);
             if server.forwarding == ForwardingMode::Vine
                 && let Some(key) = server
                     .secret
                     .as_deref()
                     .and_then(|secret| ForwardingHelper::get_vine_public_key_hex(secret).ok())
             {
-                info!("      Vine public key: {key} (networking.proxy.vine.public_key on Pumpkin)");
+                info!(
+                    "  {:width$}  Vine public key: {key} (networking.proxy.vine.public_key on Pumpkin)",
+                    ""
+                );
             }
         }
-        info!("  Default route: '{}'", self.config.routing.default_server);
         if self.config.telemetry.enabled {
             info!(
-                "  Telemetry: enabled (endpoint: {}, interval: {}s)",
+                "Telemetry is on: anonymous heartbeats go to {} every {}s",
                 self.config.telemetry.endpoint, self.config.telemetry.interval_secs
             );
-        } else {
-            info!("  Telemetry: disabled");
         }
         if self.config.bedrock.enabled {
             info!(
-                "  Bedrock Edition: enabled (listening on UDP {}, v{} / proto {})",
+                "Bedrock Edition: listening on UDP {} (v{} / proto {})",
                 self.config.bedrock.bind_address,
                 self.config.bedrock.version_name,
                 self.config.bedrock.protocol_version
             );
-        } else {
-            info!("  Bedrock Edition: disabled");
         }
-        info!("=====================================================");
 
         let trusted_proxies: Arc<Vec<network::IpRange>> = Arc::new(
             self.config
@@ -265,7 +273,7 @@ impl ProxyServer {
         });
 
         if self.config.plugins.enabled {
-            info!(
+            debug!(
                 "Loading plugins from '{}'...",
                 self.config.plugins.plugin_dir
             );
@@ -273,6 +281,11 @@ impl ProxyServer {
                 error!("Failed to load plugins: {}", e);
             }
         }
+
+        info!(
+            "Done ({:.2}s)! Type \"help\" for commands or \"end\" to stop",
+            started.elapsed().as_secs_f64()
+        );
 
         loop {
             tokio::select! {
