@@ -150,6 +150,9 @@ pub struct ServerConfig {
     /// Language used when a player's own language has no translation, e.g. `en_us`
     #[serde(default = "default_locale")]
     pub default_locale: String,
+    /// Let in 1.20.5+ players another server sent here with a transfer
+    #[serde(default)]
+    pub accept_transfers: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

@@ -150,7 +150,16 @@ impl ClientHandler {
                 self.handle_status(&mut reader, &mut writer, client_version, &clean_host)
                     .await
             }
-            HandshakeIntent::Login => {
+            HandshakeIntent::Login | HandshakeIntent::Transfer => {
+                if intent == HandshakeIntent::Transfer && !self.config.server.accept_transfers {
+                    Self::kick(
+                        &mut writer,
+                        client_version,
+                        &translate(None, "vine.login.transfers_disabled", &[]),
+                    )
+                    .await?;
+                    return Ok(());
+                }
                 let Some(login) = Box::pin(self.handle_login(
                     reader,
                     writer,
@@ -167,13 +176,6 @@ impl ClientHandler {
                     .bridge
                     .run(login.reader, login.writer, login.action_tx, login.action_rx)
                     .await?;
-                Ok(())
-            }
-            HandshakeIntent::Transfer => {
-                debug!(
-                    "[{}] Unsupported handshake intent: {:?}",
-                    self.peer_addr, intent
-                );
                 Ok(())
             }
         }

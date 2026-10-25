@@ -21,6 +21,8 @@ vine_key_file = "vine-forwarding.key"
 force_key_authentication = true
 # Language used when a player's own language has no translation
 default_locale = "en_us"
+# Let in 1.20.5+ players another server sent here with a transfer
+accept_transfers = false
 
 # Backend servers players can be sent to. Each one needs:
 #   address     host:port of the server
