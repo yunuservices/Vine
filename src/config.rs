@@ -352,87 +352,12 @@ impl Default for TelemetryConfig {
     }
 }
 
+/// The file written on first start; it is also what `Config::default()` returns
+const DEFAULT_CONFIG: &str = include_str!("default-vine.toml");
+
 impl Default for Config {
     fn default() -> Self {
-        let mut servers = HashMap::new();
-        servers.insert(
-            "lobby".to_string(),
-            BackendConfig {
-                address: "127.0.0.1:25566".to_string(),
-                forwarding: ForwardingMode::Velocity,
-                secret: None,
-                icon_path: None,
-                motd: None,
-            },
-        );
-        servers.insert(
-            "survival".to_string(),
-            BackendConfig {
-                address: "127.0.0.1:25567".to_string(),
-                forwarding: ForwardingMode::BungeeCord,
-                secret: None,
-                icon_path: None,
-                motd: None,
-            },
-        );
-        servers.insert(
-            "vanilla".to_string(),
-            BackendConfig {
-                address: "127.0.0.1:25568".to_string(),
-                forwarding: ForwardingMode::None,
-                secret: None,
-                icon_path: None,
-                motd: None,
-            },
-        );
-
-        let mut forced_hosts = HashMap::new();
-        forced_hosts.insert("survival.example.com".to_string(), "survival".to_string());
-        forced_hosts.insert("vanilla.example.com".to_string(), "vanilla".to_string());
-
-        Self {
-            server: ServerConfig {
-                bind_address: "0.0.0.0:25565".to_string(),
-                online_mode: true,
-                prevent_proxy_connections: false,
-                compression_threshold: 256,
-                compression_level: 6,
-                shutdown_timeout_secs: 10,
-                forwarding_secret_file: default_forwarding_secret_file(),
-                vine_key_file: default_vine_key_file(),
-                force_key_authentication: true,
-                default_locale: default_locale(),
-            },
-            network: NetworkConfig::default(),
-            motd: MotdConfig {
-                text: "A Vine Server".to_string(),
-                max_players: 100,
-                version_name: "Vine 1.7.x - 26.x".to_string(),
-                protocol_version: 776,
-                sample_players: Vec::new(),
-                icon_path: None,
-                show_sample_players: true,
-            },
-            security: SecurityConfig {
-                rate_limit_enabled: true,
-                max_connections_per_sec: 5,
-                connection_burst: 10,
-                max_packets_per_sec: 500,
-                max_packet_size: 2 * 1024 * 1024,
-                validate_usernames: true,
-            },
-            routing: RoutingConfig {
-                default_server: "lobby".to_string(),
-                fallback_server: Some("survival".to_string()),
-                forced_hosts,
-                try_fallback_on_connect_failure: true,
-            },
-            servers,
-            telemetry: TelemetryConfig::default(),
-            bedrock: crate::bedrock::BedrockConfig::default(),
-            permissions: PermissionsConfig::default(),
-            plugins: PluginConfig::default(),
-        }
+        toml::from_str(DEFAULT_CONFIG).expect("the default configuration parses")
     }
 }
 
@@ -477,11 +402,19 @@ impl Config {
     pub fn load_or_create<P: AsRef<Path>>(path: P) -> Result<Self, Box<dyn std::error::Error>> {
         let path = path.as_ref();
         let mut config = if path.exists() {
-            toml::from_str(&std::fs::read_to_string(path)?)?
+            let text = std::fs::read_to_string(path)?;
+            let mut unknown = Vec::new();
+            let config: Config =
+                serde_ignored::deserialize(toml::Deserializer::parse(&text)?, |key| {
+                    unknown.push(key.to_string())
+                })?;
+            for key in unknown {
+                tracing::warn!("Unknown setting '{key}' in '{}' is ignored", path.display());
+            }
+            config
         } else {
-            let default_config = Config::default();
-            std::fs::write(path, toml::to_string_pretty(&default_config)?)?;
-            default_config
+            std::fs::write(path, DEFAULT_CONFIG)?;
+            Config::default()
         };
         config.routing.forced_hosts = std::mem::take(&mut config.routing.forced_hosts)
             .into_iter()
@@ -496,6 +429,9 @@ impl Config {
         let env_secret = std::env::var(FORWARDING_SECRET_ENV).ok();
         config.resolve_forwarding_secret(path.parent().unwrap_or(Path::new("")), env_secret)?;
         config.validate()?;
+        for warning in config.warnings() {
+            tracing::warn!("{warning}");
+        }
         Ok(config)
     }
 
@@ -565,19 +501,21 @@ impl Config {
         Ok(())
     }
 
+    /// Checks every setting and reports all problems at once
     pub fn validate(&self) -> Result<(), String> {
+        let mut errors = Vec::new();
         if self.server.compression_threshold < -1 {
-            return Err("server.compression_threshold must be -1 (off) or more".to_string());
+            errors.push("server.compression_threshold must be -1 (off) or more".to_string());
         }
         if !(-1..=9).contains(&self.server.compression_level) {
-            return Err("server.compression_level must be between -1 and 9".to_string());
+            errors.push("server.compression_level must be between -1 and 9".to_string());
         }
         let security = &self.security;
         if security.max_packets_per_sec == 0 {
-            return Err("security.max_packets_per_sec must be at least 1".to_string());
+            errors.push("security.max_packets_per_sec must be at least 1".to_string());
         }
         if security.max_packet_size < crate::client::LOGIN_PACKET_LIMIT {
-            return Err(format!(
+            errors.push(format!(
                 "security.max_packet_size must be at least {}",
                 crate::client::LOGIN_PACKET_LIMIT
             ));
@@ -585,14 +523,14 @@ impl Config {
         if security.rate_limit_enabled
             && (security.max_connections_per_sec == 0 || security.connection_burst == 0)
         {
-            return Err(
+            errors.push(
                 "security.max_connections_per_sec and security.connection_burst must be at least 1 \
                  while rate limiting is on"
                     .to_string(),
             );
         }
         if self.network.proxy_protocol && self.network.proxy_protocol_trusted_proxies.is_empty() {
-            return Err(
+            errors.push(
                 "network.proxy_protocol is on, but network.proxy_protocol_trusted_proxies is empty; \
                  list the proxies allowed to send PROXY headers (\"0.0.0.0/0\" and \"::/0\" trust every address)"
                     .to_string(),
@@ -600,7 +538,7 @@ impl Config {
         }
         for entry in &self.network.proxy_protocol_trusted_proxies {
             if crate::network::IpRange::parse(entry).is_none() {
-                return Err(format!(
+                errors.push(format!(
                     "invalid entry '{entry}' in network.proxy_protocol_trusted_proxies"
                 ));
             }
@@ -620,10 +558,10 @@ impl Config {
             );
         for (field, name) in routes {
             if !self.servers.contains_key(name) {
-                return Err(format!("{field} points to unknown server '{name}'"));
+                errors.push(format!("{field} points to unknown server '{name}'"));
             }
         }
-        for (name, server) in &self.servers {
+        for (name, server) in self.sorted_servers() {
             if !matches!(
                 server.forwarding,
                 ForwardingMode::Velocity | ForwardingMode::Vine
@@ -632,18 +570,51 @@ impl Config {
             }
             let secret = server.secret.as_deref().map(str::trim).unwrap_or_default();
             if secret.is_empty() {
-                return Err(format!(
+                errors.push(format!(
                     "server '{name}' uses {:?} forwarding but has no secret configured",
                     server.forwarding
                 ));
-            }
-            if secret == LEGACY_PLACEHOLDER_SECRET {
-                return Err(format!(
+            } else if secret == LEGACY_PLACEHOLDER_SECRET {
+                errors.push(format!(
                     "server '{name}' still uses the default placeholder forwarding secret; replace it with a random value"
                 ));
             }
         }
-        Ok(())
+        match errors.len() {
+            0 => Ok(()),
+            1 => Err(errors.remove(0)),
+            n => Err(format!("{n} problems:\n  - {}", errors.join("\n  - "))),
+        }
+    }
+
+    /// Settings that work but are likely not what was meant
+    pub fn warnings(&self) -> Vec<String> {
+        let mut warnings = Vec::new();
+        if self.server.online_mode {
+            for (name, server) in self.sorted_servers() {
+                if server.forwarding == ForwardingMode::None {
+                    warnings.push(format!(
+                        "Server '{name}' has forwarding = \"none\", so it sees players with \
+                         offline-mode UUIDs and no skins"
+                    ));
+                }
+            }
+        }
+        if self.routing.fallback_server.as_ref() == Some(&self.routing.default_server) {
+            warnings.push(
+                "routing.fallback_server is the default server itself, so players have nowhere \
+                 to fall back to"
+                    .to_string(),
+            );
+        }
+        warnings
+    }
+
+    /// Servers by name, so messages come out in the same order every time
+    pub fn sorted_servers(&self) -> Vec<(&String, &BackendConfig)> {
+        let mut servers: Vec<_> = self.servers.iter().collect();
+        servers.sort_by_key(|(name, _)| name.as_str());
+        servers
     }
 }
 
@@ -689,6 +660,31 @@ mod tests {
 
         config.servers.get_mut("lobby").unwrap().forwarding = ForwardingMode::None;
         assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_template_sections_match_their_defaults() {
+        // A section left out of vine.toml falls back to these, so they must agree with the file
+        let template: toml::Value = toml::from_str(DEFAULT_CONFIG).unwrap();
+        let defaults = [
+            ("network", toml::Value::try_from(NetworkConfig::default())),
+            ("plugins", toml::Value::try_from(PluginConfig::default())),
+            (
+                "permissions",
+                toml::Value::try_from(PermissionsConfig::default()),
+            ),
+            (
+                "bedrock",
+                toml::Value::try_from(crate::bedrock::BedrockConfig::default()),
+            ),
+            (
+                "telemetry",
+                toml::Value::try_from(TelemetryConfig::default()),
+            ),
+        ];
+        for (section, default) in defaults {
+            assert_eq!(template[section], default.unwrap(), "[{section}]");
+        }
     }
 
     #[test]

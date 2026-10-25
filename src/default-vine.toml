@@ -1,0 +1,172 @@
+# Vine configuration
+
+[server]
+# Address and port players connect to
+bind_address = "0.0.0.0:25565"
+# Check player accounts with Mojang; turn off only if every backend handles authentication
+online_mode = true
+# Send the player's IP to Mojang during login, so a stolen session cannot be used from elsewhere
+prevent_proxy_connections = false
+# Packets of at least this many bytes are compressed (-1 = off, 0 = every packet)
+compression_threshold = 256
+# zlib level (-1 = zlib's default, 0 = none, 1 = fastest, 9 = smallest)
+compression_level = 6
+# Seconds to wait for open connections to close when the proxy stops
+shutdown_timeout_secs = 10
+# Secret shared with velocity backends that have no secret of their own; created on first start
+forwarding_secret_file = "forwarding.secret"
+# Signing key for vine backends that have no secret of their own; created on first start
+vine_key_file = "vine-forwarding.key"
+# Require 1.19-1.19.2 clients to have a Mojang-signed chat key in online mode
+force_key_authentication = true
+# Language used when a player's own language has no translation
+default_locale = "en_us"
+
+# Backend servers players can be sent to. Each one needs:
+#   address     host:port of the server
+#   forwarding  how the player's IP and UUID reach the server:
+#                 "velocity"   Paper, Purpur and Pumpkin with Velocity forwarding (recommended for Paper)
+#                 "vine"       Pumpkin with Vine forwarding
+#                 "bungeecord" Spigot and Paper with bungeecord: true
+#                 "none"       nothing is forwarded; the server must run in offline mode
+# Optional: secret (own velocity or vine secret), icon_path (64x64 PNG), motd (server list text
+# when this server is reached through a forced host)
+[servers.lobby]
+address = "127.0.0.1:25566"
+forwarding = "velocity"
+
+[servers.survival]
+address = "127.0.0.1:25567"
+forwarding = "bungeecord"
+
+[servers.vanilla]
+address = "127.0.0.1:25568"
+forwarding = "none"
+
+[routing]
+# Server players join first
+default_server = "lobby"
+# Server players are sent to when theirs goes down or kicks them; remove the line for none
+fallback_server = "survival"
+# Also try the fallback when the server a player is joining cannot be reached
+try_fallback_on_connect_failure = true
+
+# Send players to a server by the address they typed
+[routing.forced_hosts]
+"survival.example.com" = "survival"
+"vanilla.example.com" = "vanilla"
+
+[motd]
+# Server list text; MiniMessage tags work, \n starts a second line
+text = "A Vine Server"
+# Player limit shown in the server list
+max_players = 100
+# Version text shown to clients Vine does not support
+version_name = "Vine 1.7.x - 26.x"
+# Protocol version reported to clients Vine does not know (776 is 26.2)
+protocol_version = 776
+# Names shown when hovering over the player count
+sample_players = []
+# Show the hover list
+show_sample_players = true
+# Server list icon, a 64x64 PNG
+# icon_path = "server-icon.png"
+
+[security]
+# Limit new connections per IP
+rate_limit_enabled = true
+max_connections_per_sec = 5
+connection_burst = 10
+# A client sending more packets than this per second is kicked
+max_packets_per_sec = 500
+# Largest packet a player may send, in bytes, both on the wire and once decompressed
+max_packet_size = 2097152
+# Only allow names made of letters, digits and _ (2-16 characters)
+validate_usernames = true
+
+[network]
+# Send packets right away instead of batching small ones; keeps latency low
+tcp_nodelay = true
+# TCP keepalive interval in seconds (0 = off)
+tcp_keepalive_secs = 60
+# Seconds a client gets for each step before it is dropped
+client_handshake_timeout_secs = 10
+client_status_timeout_secs = 5
+client_login_timeout_secs = 15
+# Seconds to connect to a backend, and to finish logging in to it
+backend_connect_timeout_secs = 5
+backend_login_timeout_secs = 15
+# Extra attempts when a backend cannot be reached
+backend_connect_retry_attempts = 2
+# Pending connections the OS keeps before refusing new ones
+listen_backlog = 1024
+# Socket buffer sizes in bytes; the OS picks them when unset
+# recv_buffer_size = 262144
+# send_buffer_size = 262144
+# Accept PROXY protocol v1/v2 headers from a load balancer or DDoS protection in front of Vine
+proxy_protocol = false
+# Addresses or CIDR ranges allowed to send PROXY headers; required when proxy_protocol is on
+proxy_protocol_trusted_proxies = []
+# Log every server list ping
+log_pings = false
+
+[plugins]
+enabled = true
+plugin_dir = "./plugins"
+# Memory a single plugin may use, in MB
+max_memory_mb = 256
+# A plugin call taking longer than this, in milliseconds, disables the plugin
+call_timeout_ms = 5000
+
+[permissions]
+# Group every player is in
+default_group = "default"
+
+[permissions.groups.default]
+inherits = []
+permissions = [
+    "vine.command.server",
+    "vine.command.glist",
+    "vine.command.list",
+    "vine.command.help",
+]
+
+[permissions.groups.admin]
+inherits = ["default"]
+permissions = [
+    "vine.command.send",
+    "vine.admin",
+    "*",
+]
+
+# Give players groups or permissions by name, e.g.
+#   "Alex" = ["admin"]
+#   "Steve" = { groups = ["default"], permissions = ["vine.command.send"] }
+[permissions.users]
+
+# Answers Bedrock server list pings; Bedrock players cannot join through Vine
+[bedrock]
+enabled = false
+# UDP address and port Bedrock clients ping
+bind_address = "0.0.0.0:19132"
+motd = "A Vine Server"
+protocol_version = 2169
+version_name = "1.26.45"
+level_name = "Vine Proxy"
+game_mode = "Survival"
+game_mode_id = 0
+# Player limit shown to Bedrock clients (0 = same as motd.max_players)
+max_players = 100
+# RakNet server GUID (0 = random on every start)
+server_guid = 0
+
+# Anonymous heartbeats with the Vine version, player counts, OS, CPU, RAM and plugin list;
+# set enabled = false to turn them off
+[telemetry]
+enabled = true
+endpoint = "https://market.pumpkinmc.org/api/v1/rest/telemetry/heartbeat"
+# Seconds between heartbeats (at least 60)
+interval_secs = 300
+# List this proxy in the public directory, under server_name
+public = false
+# server_name = "My Network"

@@ -17,6 +17,7 @@ tokio = { version = "1.53", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0" }
 toml = { version = "1.1", features = ["parse", "display", "serde"] }
+serde_ignored = { version = "0.1" }
 tracing = { version = "0.1" }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "time"] }
 time = { version = "0.3", features = ["local-offset", "macros"] }

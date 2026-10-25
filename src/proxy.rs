@@ -137,8 +137,7 @@ impl ProxyServer {
             self.config.server.compression_level,
             self.config.server.compression_threshold
         );
-        let mut servers: Vec<_> = self.config.servers.iter().collect();
-        servers.sort_by_key(|(name, _)| name.as_str());
+        let servers = self.config.sorted_servers();
         let width = servers
             .iter()
             .map(|(name, _)| name.len())
