@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, io::Write, path::Path};
 
+use crate::protocol::ProtocolVersion;
+use crate::protocol::version::VersionRange;
+
 fn default_true() -> bool {
     true
 }
@@ -171,6 +174,39 @@ pub struct ServerConfig {
     /// Answer backend plugins asking the proxy things on the BungeeCord channel
     #[serde(default = "default_true")]
     pub bungee_plugin_message_channel: bool,
+    /// Oldest Minecraft version players may join with, e.g. "1.8" (empty = no limit)
+    #[serde(default)]
+    pub min_version: String,
+    /// Newest Minecraft version players may join with, e.g. "1.20.4" (empty = no limit)
+    #[serde(default)]
+    pub max_version: String,
+    /// `min_version` and `max_version` as protocols
+    #[serde(skip)]
+    pub versions: VersionRange,
+}
+
+impl ServerConfig {
+    fn resolve_versions(&mut self) {
+        self.versions = VersionRange {
+            min: ProtocolVersion::from_name(&self.min_version),
+            max: ProtocolVersion::from_name(&self.max_version),
+        };
+    }
+
+    /// The versions players may join with, as they are told it
+    pub fn allowed_versions(&self) -> String {
+        let supported = ProtocolVersion::supported_range();
+        let (first, last) = supported.split_once('-').unwrap_or_default();
+        let name = |name: &str, open: &str| match name.trim() {
+            "" => open.to_string(),
+            name => name.to_string(),
+        };
+        format!(
+            "{} \u{2013} {}",
+            name(&self.min_version, first),
+            name(&self.max_version, last)
+        )
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -455,6 +491,7 @@ impl Default for Config {
         let mut config: Config =
             toml::from_str(DEFAULT_CONFIG).expect("the default configuration parses");
         config.routing.normalize();
+        config.server.resolve_versions();
         config
     }
 }
@@ -515,6 +552,7 @@ impl Config {
             std::fs::write(path, DEFAULT_CONFIG)?;
             Config::default()
         };
+        config.server.resolve_versions();
         // Hosting panels assign the port at start, so it wins over the file
         if let Ok(bind) = std::env::var(BIND_ADDRESS_ENV)
             && !bind.trim().is_empty()
@@ -604,6 +642,25 @@ impl Config {
         }
         if !(-1..=9).contains(&self.server.compression_level) {
             errors.push("server.compression_level must be between -1 and 9".to_string());
+        }
+        let server = &self.server;
+        let versions = [
+            ("server.min_version", &server.min_version),
+            ("server.max_version", &server.max_version),
+        ];
+        for (field, name) in versions {
+            if !name.trim().is_empty() && ProtocolVersion::from_name(name).is_none() {
+                errors.push(format!(
+                    "{field} '{name}' is not a Minecraft version Vine knows"
+                ));
+            }
+        }
+        if let (Some(min), Some(max)) = (
+            ProtocolVersion::from_name(&server.min_version),
+            ProtocolVersion::from_name(&server.max_version),
+        ) && min > max
+        {
+            errors.push("server.min_version is newer than server.max_version".to_string());
         }
         let security = &self.security;
         if security.max_packets_per_sec == 0 {

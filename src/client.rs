@@ -257,6 +257,19 @@ impl ClientHandler {
             Self::kick(&mut writer, client_version, &reason).await?;
             return Ok(None);
         }
+        if !self.config.server.versions.contains(client_version) {
+            info!(
+                "[{}] Rejecting client version {} outside the allowed versions",
+                self.peer_addr, client_version
+            );
+            let reason = translate(
+                None,
+                "vine.login.version_not_allowed",
+                &[&self.config.server.allowed_versions()],
+            );
+            Self::kick(&mut writer, client_version, &reason).await?;
+            return Ok(None);
+        }
 
         let raw_login_start = timeout(login_timeout, reader.read_packet())
             .await

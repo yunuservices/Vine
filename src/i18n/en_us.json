@@ -2,6 +2,7 @@
   "vine.kick": "§c%s",
   "vine.shutdown": "Proxy is shutting down.",
   "vine.login.unsupported_version": "Unsupported Minecraft version. This proxy supports %s.",
+  "vine.login.version_not_allowed": "This server supports Minecraft %s.",
   "vine.login.invalid_username": "Invalid username characters or length (must be 2-16 alphanumeric or _)",
   "vine.login.invalid_shared_secret": "Invalid encryption key length",
   "vine.login.invalid_verify_token": "Failed to verify encryption token",

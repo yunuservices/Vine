@@ -27,6 +27,9 @@ accept_transfers = false
 kick_existing_players = false
 # Answer backend plugins that use the BungeeCord channel (server selectors, player counts, ...)
 bungee_plugin_message_channel = true
+# Oldest and newest Minecraft versions players may join with, e.g. "1.8" and "1.20.4" (empty = any)
+min_version = ""
+max_version = ""
 
 # Backend servers players can be sent to. Each one needs:
 #   address     host:port of the server

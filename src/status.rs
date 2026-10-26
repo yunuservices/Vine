@@ -10,6 +10,7 @@ use crate::config::{BackendConfig, MotdConfig};
 use crate::protocol::ProtocolVersion;
 use crate::protocol::packets::status::StatusResponse;
 use crate::protocol::text::{component_json, parse_message};
+use crate::protocol::version::VersionRange;
 use tracing::warn;
 
 const MAX_STATUS_LEN: usize = 32767;
@@ -50,6 +51,7 @@ pub struct StatusHandler {
     icon_manager: Arc<StatusIconManager>,
     servers: HashMap<String, BackendConfig>,
     forced_hosts: HashMap<String, String>,
+    versions: VersionRange,
 }
 
 impl StatusHandler {
@@ -58,12 +60,14 @@ impl StatusHandler {
         icon_manager: Arc<StatusIconManager>,
         servers: HashMap<String, BackendConfig>,
         forced_hosts: HashMap<String, String>,
+        versions: VersionRange,
     ) -> Self {
         Self {
             motd,
             icon_manager,
             servers,
             forced_hosts,
+            versions,
         }
     }
 
@@ -106,7 +110,10 @@ impl StatusHandler {
         version_name: &str,
         virtual_host: Option<&str>,
     ) -> StatusResponse {
-        let protocol = if client_version.is_known() {
+        // Any protocol but the client's own shows it the version in red
+        let protocol = if let Some(nearest) = self.versions.nearest(client_version) {
+            nearest.0 as i32
+        } else if client_version.is_known() {
             client_version.0 as i32
         } else {
             self.motd.protocol_version
@@ -212,7 +219,13 @@ mod tests {
             show_sample_players: true,
         };
 
-        let handler = StatusHandler::new(motd, icon_mgr, servers, forced_hosts);
+        let handler = StatusHandler::new(
+            motd,
+            icon_mgr,
+            servers,
+            forced_hosts,
+            VersionRange::default(),
+        );
 
         let global = handler.create_custom_status_packet(
             ProtocolVersion(776),
