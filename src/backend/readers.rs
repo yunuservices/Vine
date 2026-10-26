@@ -28,7 +28,7 @@ use crate::protocol::text::plain_text;
 use crate::protocol::{
     Frame, PacketKind, PacketReader, ProtocolVersion, decode_packet, encode_packet,
 };
-use crate::security::{Flood, PacketRateLimiter};
+use crate::security::{Flood, PacketRateLimiter, RequestSpacing};
 use crate::session::{PlayerAction, SessionManager};
 fn client_locale(
     packet: &crate::protocol::RawPacket,
@@ -150,6 +150,12 @@ fn plain_packet(packet: Bytes, served: u64) -> ClientEvent {
 
 pub(super) const CLIENT_EVENTS: usize = 16;
 
+/// How far apart one player's requests the proxy answers itself are kept
+struct Spacing {
+    commands: RequestSpacing,
+    suggestions: RequestSpacing,
+}
+
 /// Reads the client for the whole session. Its packets are handled one at a time, plugin events
 /// included, so a slow plugin only holds up what the client sends.
 pub(super) async fn read_client<R: AsyncRead + Unpin>(
@@ -163,6 +169,11 @@ pub(super) async fn read_client<R: AsyncRead + Unpin>(
         Phase::Login
     } else {
         Phase::Play
+    };
+    let security = &session.proxy_config.security;
+    let mut spacing = Spacing {
+        commands: RequestSpacing::new(security.command_interval_ms),
+        suggestions: RequestSpacing::new(security.tab_complete_interval_ms),
     };
     loop {
         let event = match reader.read_packet().await {
@@ -182,7 +193,10 @@ pub(super) async fn read_client<R: AsyncRead + Unpin>(
                 }
                 None => {
                     let current = served.borrow_and_update().clone();
-                    match session.client_packet(packet, &mut phase, &current).await {
+                    match session
+                        .client_packet(packet, &mut phase, &current, &mut spacing)
+                        .await
+                    {
                         Some(event) => event,
                         None => continue,
                     }
@@ -222,6 +236,7 @@ impl Session {
         mut raw_packet: crate::protocol::RawPacket,
         phase: &mut Phase,
         served: &Served,
+        spacing: &mut Spacing,
     ) -> Option<ClientEvent> {
         let version = self.version;
         let current = *phase;
@@ -305,8 +320,12 @@ impl Session {
                     .unwrap_or(&cmd_event.command);
                 let source = self.command_source();
                 if self.command_dispatcher.handles(first_word, &source) {
-                    self.command_dispatcher
-                        .handle_command(&source, &cmd_event.command);
+                    if spacing.commands.allow() {
+                        self.command_dispatcher
+                            .handle_command(&source, &cmd_event.command);
+                    } else {
+                        debug!("Dropping a command from '{}' sent too soon", self.username);
+                    }
                     return self.swallow_chat(&raw_packet, generation);
                 }
 
@@ -356,6 +375,9 @@ impl Session {
             {
                 match self.suggest(suggestion_req) {
                     Suggest::Proxy(request) => {
+                        if !spacing.suggestions.allow() {
+                            return None;
+                        }
                         return Some(ClientEvent::Suggest {
                             request,
                             served: generation,
