@@ -115,6 +115,8 @@ backend_connect_timeout_secs = 5
 backend_login_timeout_secs = 15
 # Extra attempts when a backend cannot be reached
 backend_connect_retry_attempts = 2
+# Seconds a playing client, or its backend, may send nothing before it is dropped (0 = off)
+read_timeout_secs = 30
 # Pending connections the OS keeps before refusing new ones
 listen_backlog = 1024
 # Socket buffer sizes in bytes; the OS picks them when unset

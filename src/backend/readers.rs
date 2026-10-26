@@ -1,9 +1,12 @@
+use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 
 use bytes::Bytes;
 use tokio::io::AsyncRead;
 use tokio::sync::{OwnedSemaphorePermit, mpsc, oneshot, watch};
-use tracing::{debug, error, warn};
+use tokio::time::{Instant, Sleep};
+use tracing::{debug, error, info, warn};
 
 use super::bridge::Phase;
 use super::client_queue::ClientQueue;
@@ -182,6 +185,44 @@ fn plain_packet(packet: Bytes, served: u64) -> ClientEvent {
 
 pub(super) const CLIENT_EVENTS: usize = 16;
 
+/// Gives up on a peer that sends nothing for `limit`. One timer serves every read: it is moved
+/// on to the read's own deadline only when it fires before that.
+struct Silence {
+    limit: Duration,
+    timer: Option<Pin<Box<Sleep>>>,
+}
+
+impl Silence {
+    fn new(secs: u64) -> Self {
+        let limit = Duration::from_secs(secs);
+        Self {
+            limit,
+            timer: (!limit.is_zero()).then(|| Box::pin(tokio::time::sleep(limit))),
+        }
+    }
+
+    /// What `read` gives, or `None` once it has waited out the limit
+    async fn read<T>(&mut self, read: impl Future<Output = T>) -> Option<T> {
+        let Some(timer) = &mut self.timer else {
+            return Some(read.await);
+        };
+        let deadline = Instant::now() + self.limit;
+        let mut read = std::pin::pin!(read);
+        loop {
+            tokio::select! {
+                biased;
+                value = &mut read => return Some(value),
+                () = timer.as_mut() => {
+                    if Instant::now() >= deadline {
+                        return None;
+                    }
+                    timer.as_mut().reset(deadline);
+                }
+            }
+        }
+    }
+}
+
 /// How far apart one player's requests the proxy answers itself are kept
 struct Spacing {
     commands: RequestSpacing,
@@ -207,8 +248,17 @@ pub(super) async fn read_client<R: AsyncRead + Unpin>(
         commands: RequestSpacing::new(security.command_interval_ms),
         suggestions: RequestSpacing::new(security.tab_complete_interval_ms),
     };
+    let mut silence = Silence::new(session.proxy_config.network.read_timeout_secs);
     loop {
-        let event = match reader.read_packet().await {
+        let Some(read) = silence.read(reader.read_packet()).await else {
+            info!(
+                "Player '{}' sent nothing for {}s and was disconnected",
+                session.username, session.proxy_config.network.read_timeout_secs
+            );
+            let _ = events.send(ClientEvent::Closed).await;
+            break;
+        };
+        let event = match read {
             Ok(packet) => match rate_limiter.record_packet(packet.payload.len() + 1) {
                 Some(flood) => {
                     match flood {
@@ -631,6 +681,7 @@ pub(super) async fn read_backend(
     mut stop: oneshot::Receiver<()>,
 ) {
     let passthrough = reader.compression() == session.client_compression;
+    let mut silence = Silence::new(session.proxy_config.network.read_timeout_secs);
     loop {
         let current = phase;
         let read = async {
@@ -648,7 +699,15 @@ pub(super) async fn read_backend(
         let frame = tokio::select! {
             biased;
             _ = &mut stop => return,
-            frame = read => frame,
+            frame = silence.read(read) => frame,
+        };
+        let Some(frame) = frame else {
+            info!(
+                "Backend '{}' sent '{}' nothing for {}s; treating it as lost",
+                server_name, session.username, session.proxy_config.network.read_timeout_secs
+            );
+            let _ = events.send(BackendEvent::Lost { reason: None }).await;
+            return;
         };
         let handled = match frame {
             Ok(Frame::Packet(packet)) => {

@@ -48,6 +48,10 @@ fn default_listen_backlog() -> u32 {
     1024
 }
 
+fn default_read_timeout() -> u64 {
+    30
+}
+
 fn default_max_bytes_per_sec() -> usize {
     4 * 1024 * 1024
 }
@@ -252,6 +256,10 @@ pub struct NetworkConfig {
     #[serde(default = "default_backend_retries")]
     pub backend_connect_retry_attempts: u32,
 
+    /// Seconds a playing client, or its backend, may send nothing before it is dropped (0 = off)
+    #[serde(default = "default_read_timeout")]
+    pub read_timeout_secs: u64,
+
     /// Optional TCP receive buffer size (SO_RCVBUF) in bytes
     #[serde(default)]
     pub recv_buffer_size: Option<usize>,
@@ -288,6 +296,7 @@ impl Default for NetworkConfig {
             backend_connect_timeout_secs: default_backend_connect_timeout(),
             backend_login_timeout_secs: default_backend_login_timeout(),
             backend_connect_retry_attempts: default_backend_retries(),
+            read_timeout_secs: default_read_timeout(),
             recv_buffer_size: None,
             send_buffer_size: None,
             listen_backlog: default_listen_backlog(),
