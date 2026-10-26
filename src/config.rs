@@ -256,9 +256,12 @@ pub struct MotdConfig {
     pub text: String,
     /// Maximum players shown in the server list ping
     pub max_players: u32,
-    /// Custom version display string (e.g. "Vine 1.7.x - 26.x")
+    /// Version text clients Vine does not support see in the server list; empty for
+    /// "Vine <supported versions>"
+    #[serde(default)]
     pub version_name: String,
-    /// Protocol version reported to clients (776 is 26.2)
+    /// Protocol reported to clients Vine does not support; 0 for the newest one Vine supports
+    #[serde(default)]
     pub protocol_version: i32,
     /// Optional sample player list shown on hover in server list
     pub sample_players: Vec<String>,
@@ -268,6 +271,21 @@ pub struct MotdConfig {
     /// Whether to show the player sample list on hover in the multiplayer menu
     #[serde(default = "default_true")]
     pub show_sample_players: bool,
+}
+
+impl MotdConfig {
+    /// Fills in the version text and protocol left to Vine, so they follow what it supports
+    fn normalize(&mut self) {
+        if self.version_name.is_empty() {
+            self.version_name = format!(
+                "Vine {}",
+                crate::protocol::ProtocolVersion::supported_range()
+            );
+        }
+        if self.protocol_version == 0 {
+            self.protocol_version = crate::protocol::ProtocolVersion::latest().0 as i32;
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -440,6 +458,7 @@ impl Default for Config {
         let mut config: Config =
             toml::from_str(DEFAULT_CONFIG).expect("the default configuration parses");
         config.routing.normalize();
+        config.motd.normalize();
         config
     }
 }
@@ -495,6 +514,7 @@ impl Config {
                 tracing::warn!("Unknown setting '{key}' in '{}' is ignored", path.display());
             }
             config.routing.normalize();
+            config.motd.normalize();
             config
         } else {
             std::fs::write(path, DEFAULT_CONFIG)?;

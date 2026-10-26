@@ -69,10 +69,10 @@ try_fallback_on_connect_failure = true
 text = "A Vine Server"
 # Player limit shown in the server list
 max_players = 100
-# Version text shown to clients Vine does not support
-version_name = "Vine 1.7.x - 26.x"
-# Protocol version reported to clients Vine does not know (776 is 26.2)
-protocol_version = 776
+# Version text clients Vine does not support see in the server list, and the protocol reported
+# to them; by default "Vine <supported versions>" and the newest supported protocol
+# version_name = "My Network 1.8-26.3"
+# protocol_version = 777
 # Names shown when hovering over the player count
 sample_players = []
 # Show the hover list

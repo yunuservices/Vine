@@ -33,6 +33,11 @@ impl ProtocolVersion {
         }
     }
 
+    /// The newest release Vine supports
+    pub fn latest() -> Self {
+        Self(RELEASES[RELEASES.len() - 1].0)
+    }
+
     pub fn supported_range() -> String {
         let first = RELEASES[0].1.split('-').next().unwrap_or_default();
         let last = RELEASES[RELEASES.len() - 1]
