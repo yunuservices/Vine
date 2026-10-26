@@ -27,6 +27,9 @@ accept_transfers = false
 kick_existing_players = false
 # Answer backend plugins that use the BungeeCord channel (server selectors, player counts, ...)
 bungee_plugin_message_channel = true
+# Server brand on the client's debug screen (F3): {backend} is the backend's own brand, {server}
+# its name in [servers], {version} Vine's version; "" leaves the backend's brand as it is
+brand = "{backend} (Vine)"
 
 # Backend servers players can be sent to. Each one needs:
 #   address     host:port of the server

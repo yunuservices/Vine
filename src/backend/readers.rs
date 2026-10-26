@@ -25,6 +25,7 @@ use crate::protocol::packets::play::{
     read_plugin_message, replace_leading_string, write_plugin_message,
 };
 use crate::protocol::text::plain_text;
+use crate::protocol::wire::{ReadExt, WriteExt};
 use crate::protocol::{
     Frame, PacketKind, PacketReader, ProtocolVersion, decode_packet, encode_packet,
 };
@@ -85,6 +86,37 @@ fn client_setting(
 }
 
 pub(super) const BRAND_CHANNEL: &str = "minecraft:brand";
+const LEGACY_BRAND_CHANNEL: &str = "MC|Brand";
+
+/// Fills the `server.brand` template the client shows on its debug screen, e.g. "Paper (Vine)";
+/// None leaves the backend's brand as it is
+fn brand_for(
+    data: &[u8],
+    version: ProtocolVersion,
+    template: &str,
+    server: &str,
+) -> Option<Vec<u8>> {
+    if template.is_empty() {
+        return None;
+    }
+    // Before 1.8 the brand is the bare text, without a length in front
+    let backend = if version < ProtocolVersion::V1_8 {
+        std::str::from_utf8(data).ok()?.to_string()
+    } else {
+        (&mut &data[..]).read_string().ok()?
+    };
+    let brand = template
+        .replace("{backend}", &backend)
+        .replace("{server}", server)
+        .replace("{version}", env!("CARGO_PKG_VERSION"));
+    let mut out = Vec::new();
+    if version < ProtocolVersion::V1_8 {
+        out.extend_from_slice(brand.as_bytes());
+    } else {
+        out.write_string(&brand);
+    }
+    Some(out)
+}
 
 // The client's acknowledgements mark every phase change; the backend switches only after
 // receiving them, so updating the phase before forwarding keeps both directions in step.
@@ -743,16 +775,26 @@ impl Session {
                 return Err(Some(BackendEvent::Lost { reason }));
             }
             Handling::PluginMessage => {
-                if current == Phase::Play
-                    && self.proxy_config.server.bungee_plugin_message_channel
-                    && let Ok((channel, data)) =
-                        read_plugin_message(&mut &raw_packet.payload[..], version)
-                    && super::bungee::is_channel(&channel)
+                if let Ok((channel, data)) =
+                    read_plugin_message(&mut &raw_packet.payload[..], version)
                 {
-                    return match events.send(BackendEvent::Bungee { channel, data }).await {
-                        Ok(()) => Ok(()),
-                        Err(_) => Err(None),
-                    };
+                    if current == Phase::Play
+                        && self.proxy_config.server.bungee_plugin_message_channel
+                        && super::bungee::is_channel(&channel)
+                    {
+                        return match events.send(BackendEvent::Bungee { channel, data }).await {
+                            Ok(()) => Ok(()),
+                            Err(_) => Err(None),
+                        };
+                    }
+                    if (channel == BRAND_CHANNEL || channel == LEGACY_BRAND_CHANNEL)
+                        && let Some(brand) =
+                            brand_for(&data, version, &self.proxy_config.server.brand, server_name)
+                    {
+                        let mut payload = Vec::new();
+                        write_plugin_message(&mut payload, &channel, &brand, version);
+                        raw_packet.payload = payload.into();
+                    }
                 }
                 if !self
                     .plugin_message_event(&mut raw_packet, server_name, PluginMessageSource::Server)

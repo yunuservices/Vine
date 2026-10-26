@@ -159,6 +159,14 @@ pub struct ServerConfig {
     /// Answer backend plugins asking the proxy things on the BungeeCord channel
     #[serde(default = "default_true")]
     pub bungee_plugin_message_channel: bool,
+    /// Server brand on the client's debug screen: `{backend}` is the backend's own brand,
+    /// `{server}` its name here, `{version}` Vine's version; empty leaves the backend's brand
+    #[serde(default = "default_brand")]
+    pub brand: String,
+}
+
+fn default_brand() -> String {
+    "{backend} (Vine)".to_string()
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
