@@ -9,6 +9,10 @@ use vine::backend::forwarding::ForwardingHelper;
 use vine::config::{Config, ForwardingMode};
 use vine::proxy::ProxyServer;
 
+/// Lines waiting for the console; the queue takes its room up front, about 4 MB at the default
+/// of 128k lines
+const LOG_LINES: usize = 4096;
+
 const USAGE: &str = "Usage: vine [--init] [CONFIG]
 
 Starts the proxy with CONFIG (default: vine.toml), creating it if it does not exist.
@@ -51,8 +55,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // Lines are written on a thread of their own, so a slow console never holds up the proxy;
-    // the guard flushes what is left, so drop it before exiting
-    let (log_writer, log_guard) = tracing_appender::non_blocking(std::io::stdout());
+    // past LOG_LINES waiting they are dropped instead. The guard flushes what is left, so drop it
+    // before exiting.
+    let (log_writer, log_guard) = tracing_appender::non_blocking::NonBlockingBuilder::default()
+        .buffered_lines_limit(LOG_LINES)
+        .finish(std::io::stdout());
     tracing_subscriber::registry()
         .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
         .with(
