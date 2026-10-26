@@ -30,6 +30,9 @@ bungee_plugin_message_channel = true
 # Server brand on the client's debug screen (F3): {backend} is the backend's own brand, {server}
 # its name in [servers], {version} Vine's version; "" leaves the backend's brand as it is
 brand = "{backend} (Vine)"
+# Oldest and newest Minecraft versions players may join with, e.g. "1.8" and "1.20.4" (empty = any)
+min_version = ""
+max_version = ""
 
 # Backend servers players can be sent to. Each one needs:
 #   address     host:port of the server

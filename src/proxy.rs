@@ -70,6 +70,7 @@ impl ProxyServer {
             icon_manager,
             config.servers.clone(),
             config.routing.forced_host_firsts(),
+            config.server.versions,
         ));
 
         let router = Arc::new(Router::new(config.routing.clone(), config.servers.clone()));

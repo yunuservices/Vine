@@ -38,6 +38,19 @@ impl ProtocolVersion {
         Self(RELEASES[RELEASES.len() - 1].0)
     }
 
+    /// The protocol of a release such as "1.8", "1.12.2" or "26.1"
+    pub fn from_name(name: &str) -> Option<Self> {
+        let wanted = release_number(name.trim())?;
+        RELEASES
+            .iter()
+            .find(|(_, names)| {
+                let (first, last) = names.split_once('-').unwrap_or((names, names));
+                release_number(first).is_some_and(|first| first <= wanted)
+                    && release_number(last).is_some_and(|last| wanted <= last)
+            })
+            .map(|(protocol, _)| Self(*protocol))
+    }
+
     pub fn supported_range() -> String {
         let first = RELEASES[0].1.split('-').next().unwrap_or_default();
         let last = RELEASES[RELEASES.len() - 1]
@@ -46,6 +59,41 @@ impl ProtocolVersion {
             .next()
             .unwrap_or_default();
         format!("{first}-{last}")
+    }
+}
+
+fn release_number(name: &str) -> Option<[u32; 3]> {
+    let mut number = [0; 3];
+    let mut parts = name.split('.');
+    for (i, slot) in number.iter_mut().enumerate() {
+        match parts.next() {
+            Some(part) if part.bytes().all(|b| b.is_ascii_digit()) => *slot = part.parse().ok()?,
+            None if i >= 2 => break,
+            _ => return None,
+        }
+    }
+    parts.next().is_none().then_some(number)
+}
+
+/// The client versions players may use; `None` leaves that end open
+#[derive(Clone, Copy, Debug, Default)]
+pub struct VersionRange {
+    pub min: Option<ProtocolVersion>,
+    pub max: Option<ProtocolVersion>,
+}
+
+impl VersionRange {
+    pub fn contains(self, version: ProtocolVersion) -> bool {
+        self.min.is_none_or(|min| version >= min) && self.max.is_none_or(|max| version <= max)
+    }
+
+    /// The end of the range nearest to `version`
+    pub fn nearest(self, version: ProtocolVersion) -> Option<ProtocolVersion> {
+        match (self.min, self.max) {
+            (Some(min), _) if version < min => Some(min),
+            (_, Some(max)) if version > max => Some(max),
+            _ => None,
+        }
     }
 }
 
@@ -65,5 +113,23 @@ mod tests {
         assert_eq!(ProtocolVersion(47).name(), "1.8-1.8.9");
         assert!(!ProtocolVersion(4).is_known());
         assert!(!ProtocolVersion(9999).is_known());
+    }
+
+    #[test]
+    fn test_release_names_resolve_inside_shared_protocols() {
+        let protocol = |name| ProtocolVersion::from_name(name).map(|v| v.0);
+        assert_eq!(protocol("1.8"), Some(47));
+        assert_eq!(protocol("1.8.9"), Some(47));
+        assert_eq!(protocol("1.12.2"), Some(340));
+        assert_eq!(protocol("1.20.3"), Some(765));
+        assert_eq!(protocol("1.20.4"), Some(765));
+        assert_eq!(protocol("1.21"), Some(767));
+        assert_eq!(protocol("26.1.1"), Some(775));
+        assert_eq!(protocol(" 26.2 "), Some(776));
+        for unknown in [
+            "", "1", "1.8.10", "1.20.7", "1.8.x", "1.8.", "+1.8", "1.8.9.1", "27.1",
+        ] {
+            assert_eq!(protocol(unknown), None, "{unknown}");
+        }
     }
 }

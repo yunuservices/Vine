@@ -252,7 +252,20 @@ impl ClientHandler {
             let reason = translate(
                 None,
                 "vine.login.unsupported_version",
-                &[&ProtocolVersion::supported_range()],
+                &[&self.config.server.allowed_versions()],
+            );
+            Self::kick(&mut writer, client_version, &reason).await?;
+            return Ok(None);
+        }
+        if !self.config.server.versions.contains(client_version) {
+            info!(
+                "[{}] Rejecting client version {} outside the allowed versions",
+                self.peer_addr, client_version
+            );
+            let reason = translate(
+                None,
+                "vine.login.version_not_allowed",
+                &[&self.config.server.allowed_versions()],
             );
             Self::kick(&mut writer, client_version, &reason).await?;
             return Ok(None);
