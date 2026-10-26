@@ -340,7 +340,10 @@ impl BackendBridge {
         let client_reader = Task::spawn(read_client(
             session.clone(),
             client_reader,
-            PacketRateLimiter::new(bridge.max_packets_per_sec),
+            PacketRateLimiter::new(
+                bridge.max_packets_per_sec,
+                bridge.proxy_config.security.max_bytes_per_sec,
+            ),
             served_rx,
             client_events_tx,
         ));

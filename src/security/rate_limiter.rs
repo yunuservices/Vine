@@ -109,30 +109,49 @@ fn bucket_key(ip: &IpAddr) -> IpAddr {
 /// Per-connection packet rate limiter to detect and prevent packet flood attacks
 pub struct PacketRateLimiter {
     max_packets_per_sec: u32,
+    max_bytes_per_sec: usize,
     packet_count: u32,
+    byte_count: usize,
     window_start: Instant,
 }
 
+/// The limit a client went over
+#[derive(Debug, PartialEq, Eq)]
+pub enum Flood {
+    Packets,
+    Bytes,
+}
+
 impl PacketRateLimiter {
-    pub fn new(max_packets_per_sec: u32) -> Self {
+    /// `max_bytes_per_sec` of 0 leaves the bytes unlimited
+    pub fn new(max_packets_per_sec: u32, max_bytes_per_sec: usize) -> Self {
         Self {
             max_packets_per_sec,
+            max_bytes_per_sec,
             packet_count: 0,
+            byte_count: 0,
             window_start: Instant::now(),
         }
     }
 
-    /// Record a packet and return false if limit exceeded (flood detected)
-    pub fn record_packet(&mut self) -> bool {
+    /// Records a packet of `size` bytes; the limit it went over, if any
+    pub fn record_packet(&mut self, size: usize) -> Option<Flood> {
         let now = Instant::now();
         if now.duration_since(self.window_start) >= Duration::from_secs(1) {
             self.window_start = now;
-            self.packet_count = 1;
-            return true;
+            self.packet_count = 0;
+            self.byte_count = 0;
         }
 
         self.packet_count += 1;
-        self.packet_count <= self.max_packets_per_sec
+        self.byte_count = self.byte_count.saturating_add(size);
+        if self.packet_count > self.max_packets_per_sec {
+            Some(Flood::Packets)
+        } else if self.max_bytes_per_sec != 0 && self.byte_count > self.max_bytes_per_sec {
+            Some(Flood::Bytes)
+        } else {
+            None
+        }
     }
 }
 
@@ -142,11 +161,11 @@ mod tests {
 
     #[test]
     fn test_packet_rate_limiter() {
-        let mut limiter = PacketRateLimiter::new(3);
-        assert!(limiter.record_packet());
-        assert!(limiter.record_packet());
-        assert!(limiter.record_packet());
-        assert!(!limiter.record_packet());
+        let mut limiter = PacketRateLimiter::new(3, 100);
+        assert_eq!(limiter.record_packet(10), None);
+        assert_eq!(limiter.record_packet(90), None);
+        assert_eq!(limiter.record_packet(1), Some(Flood::Bytes));
+        assert_eq!(limiter.record_packet(0), Some(Flood::Packets));
     }
 
     #[test]

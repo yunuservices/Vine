@@ -29,7 +29,7 @@ use crate::protocol::wire::{ReadExt, WriteExt};
 use crate::protocol::{
     Frame, PacketKind, PacketReader, ProtocolVersion, decode_packet, encode_packet,
 };
-use crate::security::PacketRateLimiter;
+use crate::security::{Flood, PacketRateLimiter};
 use crate::session::{PlayerAction, SessionManager};
 fn client_locale(
     packet: &crate::protocol::RawPacket,
@@ -198,20 +198,28 @@ pub(super) async fn read_client<R: AsyncRead + Unpin>(
     };
     loop {
         let event = match reader.read_packet().await {
-            Ok(_) if !rate_limiter.record_packet() => {
-                warn!(
-                    "Player '{}' exceeded packet rate limit (flood protection kicked in)",
-                    session.username
-                );
-                ClientEvent::Closed
-            }
-            Ok(packet) => {
-                let current = served.borrow_and_update().clone();
-                match session.client_packet(packet, &mut phase, &current).await {
-                    Some(event) => event,
-                    None => continue,
+            Ok(packet) => match rate_limiter.record_packet(packet.payload.len() + 1) {
+                Some(flood) => {
+                    match flood {
+                        Flood::Packets => warn!(
+                            "Player '{}' exceeded packet rate limit (flood protection kicked in)",
+                            session.username
+                        ),
+                        Flood::Bytes => warn!(
+                            "Player '{}' exceeded byte rate limit (flood protection kicked in)",
+                            session.username
+                        ),
+                    }
+                    ClientEvent::Closed
                 }
-            }
+                None => {
+                    let current = served.borrow_and_update().clone();
+                    match session.client_packet(packet, &mut phase, &current).await {
+                        Some(event) => event,
+                        None => continue,
+                    }
+                }
+            },
             Err(e) => {
                 debug!("Client '{}' stream ended: {:?}", session.username, e);
                 ClientEvent::Closed

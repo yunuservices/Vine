@@ -45,6 +45,10 @@ fn default_listen_backlog() -> u32 {
     1024
 }
 
+fn default_max_bytes_per_sec() -> usize {
+    4 * 1024 * 1024
+}
+
 const LEGACY_PLACEHOLDER_SECRET: &str = "vine-velocity-secret-change-me";
 const FORWARDING_SECRET_ENV: &str = "VINE_FORWARDING_SECRET";
 const BIND_ADDRESS_ENV: &str = "VINE_BIND_ADDRESS";
@@ -298,6 +302,9 @@ pub struct SecurityConfig {
     pub connection_burst: u32,
     /// Maximum packets per second from a single client before being kicked for flooding
     pub max_packets_per_sec: u32,
+    /// Maximum bytes per second a single client may send, counted once decompressed (0 = off)
+    #[serde(default = "default_max_bytes_per_sec")]
+    pub max_bytes_per_sec: usize,
     /// Maximum packet size a logged-in client may send, in bytes, both on the wire and once
     /// inflated (default 2MB; the wire size is capped at the protocol maximum of 2097151)
     pub max_packet_size: usize,
@@ -706,6 +713,15 @@ impl Config {
             warnings.push(
                 "server.kick_existing_players only works in online mode, where accounts are \
                  verified"
+                    .to_string(),
+            );
+        }
+        let security = &self.security;
+        if security.max_bytes_per_sec != 0 && security.max_bytes_per_sec < security.max_packet_size
+        {
+            warnings.push(
+                "security.max_bytes_per_sec is below security.max_packet_size, so a single large \
+                 packet gets a player kicked"
                     .to_string(),
             );
         }

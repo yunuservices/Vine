@@ -87,6 +87,8 @@ max_connections_per_sec = 5
 connection_burst = 10
 # A client sending more packets than this per second is kicked
 max_packets_per_sec = 500
+# A client sending more bytes than this per second, counted decompressed, is kicked (0 = off)
+max_bytes_per_sec = 4194304
 # Largest packet a player may send, in bytes, both on the wire and once decompressed
 max_packet_size = 2097152
 # Only allow names made of letters, digits and _ (2-16 characters)
