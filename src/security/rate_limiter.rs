@@ -155,6 +155,52 @@ impl PacketRateLimiter {
     }
 }
 
+/// Keeps one player's requests of a kind at least `interval` apart
+pub struct RequestSpacing {
+    interval: Duration,
+    last: Option<Instant>,
+}
+
+impl RequestSpacing {
+    /// `interval_ms` of 0 lets every request through
+    pub fn new(interval_ms: u64) -> Self {
+        Self {
+            interval: Duration::from_millis(interval_ms),
+            last: None,
+        }
+    }
+
+    /// How long a request arriving now waits to keep its distance from the last one; it counts
+    /// as let through once that wait is over
+    pub fn delay(&mut self) -> Duration {
+        if self.interval.is_zero() {
+            return Duration::ZERO;
+        }
+        let now = Instant::now();
+        let at = self
+            .last
+            .map_or(now, |last| (last + self.interval).max(now));
+        self.last = Some(at);
+        at - now
+    }
+
+    /// False when the request came too soon after the last one let through
+    pub fn allow(&mut self) -> bool {
+        if self.interval.is_zero() {
+            return true;
+        }
+        let now = Instant::now();
+        if self
+            .last
+            .is_some_and(|last| now.duration_since(last) < self.interval)
+        {
+            return false;
+        }
+        self.last = Some(now);
+        true
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

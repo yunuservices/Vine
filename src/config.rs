@@ -49,6 +49,14 @@ fn default_max_bytes_per_sec() -> usize {
     4 * 1024 * 1024
 }
 
+fn default_command_interval_ms() -> u64 {
+    50
+}
+
+fn default_tab_complete_interval_ms() -> u64 {
+    10
+}
+
 const LEGACY_PLACEHOLDER_SECRET: &str = "vine-velocity-secret-change-me";
 const FORWARDING_SECRET_ENV: &str = "VINE_FORWARDING_SECRET";
 const BIND_ADDRESS_ENV: &str = "VINE_BIND_ADDRESS";
@@ -305,6 +313,13 @@ pub struct SecurityConfig {
     /// Maximum bytes per second a single client may send, counted once decompressed (0 = off)
     #[serde(default = "default_max_bytes_per_sec")]
     pub max_bytes_per_sec: usize,
+    /// Least milliseconds between two proxy commands from one player; sooner ones wait (0 = off)
+    #[serde(default = "default_command_interval_ms")]
+    pub command_interval_ms: u64,
+    /// Least milliseconds between two suggestion requests the proxy answers for one player;
+    /// sooner ones are dropped (0 = off)
+    #[serde(default = "default_tab_complete_interval_ms")]
+    pub tab_complete_interval_ms: u64,
     /// Maximum packet size a logged-in client may send, in bytes, both on the wire and once
     /// inflated (default 2MB; the wire size is capped at the protocol maximum of 2097151)
     pub max_packet_size: usize,

@@ -89,6 +89,10 @@ connection_burst = 10
 max_packets_per_sec = 500
 # A client sending more bytes than this per second, counted decompressed, is kicked (0 = off)
 max_bytes_per_sec = 4194304
+# Least milliseconds between two proxy commands from one player, and two proxy tab completions;
+# a command sent sooner waits, a tab completion is ignored (0 = off)
+command_interval_ms = 50
+tab_complete_interval_ms = 10
 # Largest packet a player may send, in bytes, both on the wire and once decompressed
 max_packet_size = 2097152
 # Only allow names made of letters, digits and _ (2-16 characters)
