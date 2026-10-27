@@ -2,4 +2,10 @@
 ignore = [
     { id = "RUSTSEC-2023-0071", reason = "No fixed rsa release exists; online-mode login needs PKCS#1 v1.5 decryption like vanilla, and the key pair is regenerated on every start" },
     { id = "RUSTSEC-2026-0173", reason = "proc-macro-error2 is pulled in by Pumpkin's pumpkin-macros and only runs at compile time" },
+    # zstd only backs wasmtime's on-disk module cache, which neither Vine nor Pumpkin's plugin
+    # runtime turns on; the fixed releases need a wasmtime that moved to zstd 0.14
+    { id = "RUSTSEC-2026-0391", reason = "zstd is only used by wasmtime's module cache, which is never enabled" },
+    { id = "RUSTSEC-2026-0398", reason = "zstd is only used by wasmtime's module cache, which is never enabled" },
+    { id = "RUSTSEC-2026-0403", reason = "zstd is only used by wasmtime's module cache, which is never enabled" },
+    { id = "RUSTSEC-2026-0410", reason = "affects zstd-sys built for wasm32; Vine builds it natively, and only for wasmtime's unused module cache" },
 ]
