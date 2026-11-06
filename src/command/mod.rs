@@ -51,7 +51,9 @@ impl CommandSender {
     pub fn send_message(&self, message: TextComponent) {
         match self {
             Self::Console => {
-                info!("{}", message.to_pretty_console());
+                // The log formatter escapes embedded ANSI sequences. Let it own
+                // terminal styling rather than logging TextComponent color codes.
+                info!("{}", message.get_text());
             }
             Self::Player { action_tx, .. } => {
                 let _ = action_tx.try_send(PlayerAction::Message(message));
